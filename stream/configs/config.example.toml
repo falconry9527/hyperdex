@@ -1,0 +1,13 @@
+# Copy to config.toml and fill in real credentials.
+# config.toml is gitignored; this template is committed.
+
+[http]
+addr = ":8090"
+
+[redis]
+host         = "127.0.0.1:6379"
+password     = ""
+db           = 0
+max-idle     = 8
+max-active   = 64
+idle-timeout = 180

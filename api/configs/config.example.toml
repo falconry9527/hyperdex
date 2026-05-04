@@ -1,0 +1,42 @@
+# Copy to config.toml and fill in real credentials.
+
+[http]
+addr = ":8080"
+
+[postgres]
+max-open-conns = 64
+max-idle-conns = 16
+host           = "127.0.0.1:5432"
+user           = "postgres"
+password       = "CHANGE_ME"
+database       = "marketdata"
+table-prefix   = ""
+
+[postgres.params]
+sslmode = "disable"
+
+[redis]
+host         = "127.0.0.1:6379"
+password     = ""
+db           = 0
+max-idle     = 8
+max-active   = 64
+idle-timeout = 180
+
+[kline]
+default_limit = 1500
+max_limit     = 5000
+
+# HL REST passthrough — currently used only for /meta. Override via HL_API_URL.
+[hl]
+api_url = "https://api.hyperliquid.xyz"
+
+# In-memory cache TTL for /meta (asset universe). Defaults to 300s if 0/unset.
+[meta]
+cache_ttl_sec = 300
+
+# /myfills paging caps. Heavy traders can rack thousands of fills; the
+# (user_addr, time DESC) index keeps queries fast even at MaxLimit.
+[myfills]
+default_limit = 500
+max_limit     = 5000

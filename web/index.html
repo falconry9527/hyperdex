@@ -1,0 +1,1699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>HL Trading</title>
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://unpkg.com/@msgpack/msgpack@2.8.0/dist.es5+umd/msgpack.min.js"></script>
+  <script src="https://unpkg.com/js-sha3@0.9.3/build/sha3.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f1115; color: #e6e6e6;
+      height: 100vh; overflow: hidden;
+      font-variant-numeric: tabular-nums;
+    }
+    button {
+      font-family: inherit; cursor: pointer;
+      background: #1a2030; color: #e6e6e6;
+      border: 1px solid #2a313f; border-radius: 4px;
+      padding: 6px 10px; font-size: 12px;
+    }
+    button:hover:not(:disabled)  { background: #243044; }
+    button:disabled              { opacity: .45; cursor: not-allowed; }
+    input, select {
+      background: #0f1115; color: #e6e6e6;
+      border: 1px solid #2a313f; border-radius: 4px;
+      padding: 5px 9px; font-size: 13px;
+    }
+    input[type=number]::-webkit-outer-spin-button,
+    input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
+
+    /* ─── top bar ─── */
+    .bar {
+      display: flex; align-items: center; gap: 14px;
+      padding: 8px 16px;
+      border-bottom: 1px solid #1f2530;
+      background: #131720;
+    }
+    .bar h1 { font-size: 12px; font-weight: 600; color: #8a92a3; letter-spacing: .04em; }
+    .bar .sep { width: 1px; height: 22px; background: #1f2530; }
+    .bar .last { font-size: 18px; font-weight: 600; color: #e6e6e6; }
+    .bar .last.up   { color: #4ade80; }
+    .bar .last.down { color: #ef4444; }
+    .bar .stat { font-size: 11px; color: #5a6478; display: flex; flex-direction: column; gap: 1px; line-height: 1.1; }
+    .bar .stat .label { letter-spacing: .06em; text-transform: uppercase; }
+    .bar .stat .val   { color: #e6e6e6; font-size: 12px; }
+    .bar .stat .val.up   { color: #4ade80; }
+    .bar .stat .val.down { color: #ef4444; }
+    .bar .spacer { flex: 1; }
+    .bar .wallet { font-size: 12px; display: inline-flex; gap: 6px; align-items: center; }
+    .bar .wallet .addr { color: #e6e6e6; font-family: ui-monospace, Menlo, Monaco, monospace; }
+    .bar .wallet .trading-on { color: #4ade80; font-weight: 600; }
+    .bar .status { font-size: 11px; color: #5a6478; }
+    .bar .status.ok    { color: #4ade80; }
+    .bar .status.err   { color: #ef4444; }
+    .bar .status.wait  { color: #facc15; }
+
+    /* ─── grid ─── */
+    .main {
+      display: grid;
+      grid-template-columns: 1fr 240px 200px 240px;
+      grid-template-rows: minmax(0, 1fr) 240px;
+      grid-template-areas:
+        "chart book trades order"
+        "tabs  tabs tabs   order";
+      height: calc(100vh - 49px);
+      gap: 0;
+    }
+    #chart   { grid-area: chart; min-width: 0; min-height: 0; }
+    #book    { grid-area: book;  border-left: 1px solid #1f2530; background: #0c0e13; display: flex; flex-direction: column; font-size: 12px; }
+    #trades  { grid-area: trades;border-left: 1px solid #1f2530; background: #0c0e13; display: flex; flex-direction: column; font-size: 12px; }
+    #order   { grid-area: order; border-left: 1px solid #1f2530; background: #0c0e13; display: flex; flex-direction: column; font-size: 12px; padding: 10px; gap: 8px; }
+    #tabs    { grid-area: tabs;  border-top: 1px solid #1f2530; background: #0c0e13; display: flex; flex-direction: column; }
+
+    /* ─── panel header (book/trades/order) ─── */
+    .panel-head {
+      padding: 6px 10px;
+      color: #5a6478; font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+      border-bottom: 1px solid #1f2530;
+    }
+
+    /* ─── L2 book ─── */
+    #book .book-controls {
+      display: flex; align-items: center; gap: 8px;
+      padding: 5px 10px; border-bottom: 1px solid #1f2530;
+      font-size: 11px; color: #5a6478;
+    }
+    #book .book-title { color: #8a92a3; letter-spacing: .06em; text-transform: uppercase; font-weight: 600; }
+    #book .book-controls select { padding: 2px 6px; font-size: 11px; }
+    #book .book-step-info { margin-left: auto; font-variant-numeric: tabular-nums; }
+    #book .panel-head { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+    #book .panel-head span:nth-child(2),
+    #book .panel-head span:nth-child(3) { text-align: right; }
+    #book .side { flex: 1 1 0; overflow: hidden; }
+    #book .side.asks  { display: flex; flex-direction: column-reverse; }
+    #book .side.bids  { display: flex; flex-direction: column; }
+    #book .row {
+      position: relative; display: grid; grid-template-columns: 1fr 1fr 1fr;
+      gap: 6px; padding: 2px 10px;
+    }
+    #book .row .bg { position: absolute; top: 0; bottom: 0; right: 0; pointer-events: none; }
+    #book .row .px, #book .row .sz, #book .row .n { position: relative; z-index: 1; }
+    #book .row .sz, #book .row .n { text-align: right; color: #aab; }
+    #book .ask .px { color: #ef4444; }
+    #book .ask .bg { background: rgba(239, 68, 68, 0.12); }
+    #book .bid .px { color: #4ade80; }
+    #book .bid .bg { background: rgba(74, 222, 128, 0.12); }
+    #book .spread {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 6px; border-top: 1px solid #1f2530; border-bottom: 1px solid #1f2530;
+      color: #8a92a3;
+    }
+    #book .spread b { color: #e6e6e6; font-weight: 600; }
+
+    /* ─── trades ─── */
+    #trades .panel-head { display: grid; grid-template-columns: 1.1fr 1.2fr 1fr; gap: 6px; }
+    #trades .panel-head span:nth-child(2),
+    #trades .panel-head span:nth-child(3) { text-align: right; }
+    #trades .list { flex: 1 1 0; overflow-y: auto; display: flex; flex-direction: column; }
+    #trades .row { display: grid; grid-template-columns: 1.1fr 1.2fr 1fr; gap: 6px; padding: 2px 10px; }
+    #trades .row .px, #trades .row .sz, #trades .row .time { text-align: right; color: #aab; }
+    #trades .row .time:first-child { text-align: left; color: #5a6478; }
+    #trades .row.B .px { color: #4ade80; }
+    #trades .row.A .px { color: #ef4444; }
+
+    .empty { padding: 16px; color: #5a6478; text-align: center; font-size: 12px; }
+
+    /* ─── order entry ─── */
+    #order .toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+    #order .toggles button {
+      padding: 7px 0; font-size: 12px; font-weight: 600;
+      background: #161b25; border-color: #2a313f;
+    }
+    #order .toggles button.on.buy  { background: #16331f; color: #4ade80; border-color: #4ade8044; }
+    #order .toggles button.on.sell { background: #331616; color: #ef4444; border-color: #ef444444; }
+    #order .toggles button.on.lim  { background: #1a2742; color: #93c5fd; border-color: #3b82f644; }
+    #order .toggles button.on.mkt  { background: #1a2742; color: #93c5fd; border-color: #3b82f644; }
+    #order .field { display: flex; flex-direction: column; gap: 3px; }
+    #order .field label { font-size: 10px; color: #5a6478; letter-spacing: .06em; text-transform: uppercase; }
+    #order .field input { width: 100%; }
+    #order .row-flex { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #8a92a3; }
+    #order .summary {
+      padding: 6px 8px; background: #0a0c12; border: 1px solid #1f2530; border-radius: 4px;
+      font-size: 11px; color: #8a92a3; display: flex; flex-direction: column; gap: 2px;
+    }
+    #order .summary b { color: #e6e6e6; font-weight: 500; }
+    #order .err { color: #ef4444; font-size: 11px; min-height: 14px; }
+    #order .place {
+      padding: 10px; font-size: 13px; font-weight: 600;
+    }
+    #order .place.buy  { background: #16331f; color: #4ade80; border-color: #4ade8044; }
+    #order .place.buy:hover:not(:disabled)  { background: #1c4628; }
+    #order .place.sell { background: #331616; color: #ef4444; border-color: #ef444444; }
+    #order .place.sell:hover:not(:disabled) { background: #471d1d; }
+
+    #order .lev-row { display: grid; grid-template-columns: 1fr auto 1fr auto; gap: 5px; align-items: center; }
+    #order .lev-row input { width: 100%; }
+    #order .lev-row select { width: 100%; }
+    #order .lev-x { color: #5a6478; font-size: 12px; }
+    #order .lev-apply { padding: 5px 8px; font-size: 11px; }
+    #order .lev-meta { float: right; color: #5a6478; font-size: 9px; text-transform: none; letter-spacing: 0; }
+
+    /* ─── bottom tabs ─── */
+    #tabs .nav {
+      display: flex; gap: 2px; padding: 4px 8px 0;
+      border-bottom: 1px solid #1f2530;
+    }
+    #tabs .nav button {
+      background: transparent; border: none; border-bottom: 2px solid transparent;
+      padding: 8px 14px; font-size: 12px; color: #8a92a3; border-radius: 0;
+    }
+    #tabs .nav button:hover  { color: #e6e6e6; background: transparent; }
+    #tabs .nav button.on     { color: #e6e6e6; border-bottom-color: #93c5fd; }
+    #tabs .body { flex: 1 1 0; overflow: auto; }
+    #tabs table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    #tabs th { text-align: left; padding: 8px 12px; color: #5a6478; font-weight: 500; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; border-bottom: 1px solid #1f2530; position: sticky; top: 0; background: #0c0e13; }
+    #tabs td { padding: 6px 12px; color: #aab; border-bottom: 1px solid #14181f; }
+    #tabs td.num { text-align: right; }
+    #tabs td.up   { color: #4ade80; }
+    #tabs td.down { color: #ef4444; }
+
+    /* ─── modal ─── */
+    .modal {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.55);
+      display: none; align-items: center; justify-content: center; z-index: 100;
+    }
+    .modal.show { display: flex; }
+    .modal .box {
+      background: #131720; border: 1px solid #2a313f; border-radius: 8px;
+      padding: 18px 20px; min-width: 360px; max-width: 480px;
+    }
+    .modal h3 { font-size: 14px; margin-bottom: 12px; }
+    .modal .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 12px; margin-bottom: 14px; }
+    .modal .kv .k { color: #5a6478; }
+    .modal .kv .v { color: #e6e6e6; text-align: right; }
+    .modal .kv .v.buy  { color: #4ade80; }
+    .modal .kv .v.sell { color: #ef4444; }
+    .modal .actions { display: flex; gap: 8px; justify-content: flex-end; }
+    .modal .warn { color: #facc15; font-size: 11px; margin-bottom: 10px; }
+
+    /* ─── toast ─── */
+    #toasts { position: fixed; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 6px; z-index: 200; }
+    .toast {
+      padding: 10px 14px; border-radius: 6px; font-size: 12px;
+      background: #1a2030; border: 1px solid #2a313f; max-width: 360px;
+    }
+    .toast.ok  { border-color: #4ade8044; }
+    .toast.err { border-color: #ef444466; color: #fca5a5; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <h1>HL TRADING</h1>
+    <select id="coin">
+      <option>BTC</option><option>ETH</option><option>SOL</option>
+    </select>
+    <select id="interval">
+      <option>1m</option><option>5m</option><option>15m</option>
+      <option>1h</option><option>4h</option><option>1d</option><option>1mo</option>
+    </select>
+    <span class="sep"></span>
+    <span class="last" id="last">—</span>
+    <span class="stat"><span class="label">24h</span><span class="val" id="chg24">—</span></span>
+    <span class="stat"><span class="label">24h vol</span><span class="val" id="vol24">—</span></span>
+    <span class="stat"><span class="label">mark</span><span class="val" id="mark">—</span></span>
+    <span class="stat"><span class="label">funding / next</span><span class="val" id="funding">—</span></span>
+    <span class="spacer"></span>
+    <span class="stat"><span class="label">equity</span><span class="val" id="equity">—</span></span>
+    <span class="wallet" id="walletWrap">
+      <button id="connectBtn">Connect Wallet</button>
+    </span>
+    <span class="status wait" id="status">connecting…</span>
+  </div>
+
+  <div class="main">
+    <div id="chart"></div>
+
+    <aside id="book">
+      <div class="book-controls">
+        <span class="book-title">L2 Book</span>
+        <select id="bookStep" title="size per row (each row aggregates depth until total = this size)">
+          <option value="0">raw</option>
+          <option value="0.1">0.1</option>
+          <option value="1">1</option>
+          <option value="10">10</option>
+          <option value="100">100</option>
+        </select>
+        <span class="book-step-info" id="bookStepInfo"></span>
+      </div>
+      <div class="panel-head"><span>Price</span><span>Size</span><span>Sum</span></div>
+      <div class="side asks" id="asks"></div>
+      <div class="spread"><span>spread</span> <b id="spreadVal">—</b></div>
+      <div class="side bids" id="bids"></div>
+    </aside>
+
+    <aside id="trades">
+      <div class="panel-head"><span>Time</span><span>Price</span><span>Size</span></div>
+      <div class="list" id="tradesList"></div>
+    </aside>
+
+    <aside id="order">
+      <div class="toggles" id="sideToggles">
+        <button class="on buy"  data-side="B">Buy</button>
+        <button class="sell"     data-side="A">Sell</button>
+      </div>
+      <div class="toggles" id="typeToggles">
+        <button class="on lim" data-type="limit">Limit</button>
+        <button class="mkt"    data-type="market">Market</button>
+      </div>
+      <div class="field" id="priceField">
+        <label>Price (USD)</label>
+        <input id="priceInput" type="number" step="any" placeholder="0.0" />
+      </div>
+      <div class="field">
+        <label>Size (<span id="sizeUnit">BTC</span>)</label>
+        <input id="sizeInput" type="number" step="any" placeholder="0.0" />
+      </div>
+      <div class="field" id="slippageField" style="display:none">
+        <label>Max slippage (%)</label>
+        <input id="slipInput" type="number" step="0.1" value="0.5" />
+      </div>
+      <div class="field">
+        <label>Leverage / margin <span class="lev-meta" id="levMeta"></span></label>
+        <div class="lev-row">
+          <input id="levInput" type="number" min="1" step="1" placeholder="—" />
+          <span class="lev-x">×</span>
+          <select id="marginMode">
+            <option value="cross">Cross</option>
+            <option value="isolated">Isolated</option>
+          </select>
+          <button id="applyLevBtn" class="lev-apply" disabled>Apply</button>
+        </div>
+      </div>
+      <label class="row-flex"><input id="reduceOnly" type="checkbox" /> reduce only</label>
+      <div class="summary" id="orderSummary">
+        <div>notional <b id="notionalOut">$0.00</b></div>
+        <div>fee est <b id="feeOut">$0.00</b></div>
+      </div>
+      <div class="err" id="orderErr"></div>
+      <button class="place buy" id="placeBtn" disabled>Connect wallet</button>
+    </aside>
+
+    <div id="tabs">
+      <div class="nav">
+        <button class="on" data-tab="positions">Positions</button>
+        <button data-tab="orders">Open Orders</button>
+        <button data-tab="fills">Fills</button>
+      </div>
+      <div class="body" id="tabsBody"></div>
+    </div>
+  </div>
+
+  <div class="modal" id="confirmModal">
+    <div class="box">
+      <h3>Confirm order</h3>
+      <div class="warn" id="confirmWarn"></div>
+      <div class="kv" id="confirmKV"></div>
+      <div class="actions">
+        <button id="confirmCancel">Cancel</button>
+        <button id="confirmOk" class="place buy">Sign &amp; Submit</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toasts"></div>
+
+<script type="module">
+// ESM-only crypto lib for secp256k1 signing of L1 actions with the agent key.
+// Imported at module-scope so the rest of the script can use `secp.*` directly.
+import * as secp from 'https://esm.sh/@noble/secp256k1@2.2.1';
+
+// ════════════════════════════════════════════════════════════════════════
+// Constants & globals
+// ════════════════════════════════════════════════════════════════════════
+
+const API_URL    = 'http://localhost:8080';        // REST: /klines + /meta
+const WS_URL     = 'ws://localhost:8090/ws';       // public stream
+const HL_REST    = 'https://api.hyperliquid.xyz';  // direct HL REST (POST /info, /exchange)
+const HL_WS      = 'wss://api.hyperliquid.xyz/ws'; // private user data ws (direct to HL)
+const IS_MAINNET = true;                            // → source "a" in signing
+const LARGE_NOTIONAL_USD = 1000;                    // confirm-twice threshold
+
+// Arbitrum One — required for the one-time approveAgent signing (chainId must
+// match the active wallet network for MetaMask 11+ to accept signTypedData_v4).
+const ARBITRUM_CHAIN_ID_HEX = '0xa4b1';            // 42161
+
+// localStorage slot for the per-browser HL "API wallet" (agent). Holding a key
+// here lets us sign every order locally without bothering MetaMask. The agent
+// can only place/cancel orders on behalf of the user — it cannot move funds.
+const AGENT_LS_KEY = 'hl_agent_v1';
+
+// ════════════════════════════════════════════════════════════════════════
+// State
+// ════════════════════════════════════════════════════════════════════════
+
+let publicWS = null;
+let privateWS = null;
+let currentKline = null;     // {coin, interval}
+let currentCoin  = null;
+let metaByCoin   = {};       // coin → AssetInfo
+let metaUniverse = [];       // ordered list = HL asset indices
+let bestBid = null, bestAsk = null;
+let lastBookTs = 0;
+
+let walletAddr   = null;     // 0x... (the user's MetaMask address, the "owner")
+let userEquity   = null;
+let positions    = [];
+let openOrders   = [];
+let fills        = [];
+
+// agent: { privKeyHex: "0x..", addrHex: "0x..", owner: "0x..", approvedAt: ms }
+// `owner` is the MetaMask address that approved this agent — ensures we don't
+// reuse an agent key under a different connected wallet.
+let agent = null;
+
+// Per-coin leverage state cached from webData2. Shape:
+//   { BTC: { value: 10, type: "cross"|"isolated" }, ... }
+// Only present for coins with an open position (HL doesn't expose a per-asset
+// "preset leverage" otherwise — leverage lives on the position).
+let leverageByCoin = {};
+
+let orderForm = {
+  side: 'B',          // "B" buy, "A" sell
+  type: 'limit',      // "limit" | "market"
+  reduceOnly: false,
+};
+
+let activeTab = 'positions';
+let confirmedOnceToday = false;     // "first mainnet order today" gate
+
+// ════════════════════════════════════════════════════════════════════════
+// DOM refs
+// ════════════════════════════════════════════════════════════════════════
+
+const $ = id => document.getElementById(id);
+const statusEl = $('status');
+const lastEl   = $('last');
+const chgEl    = $('chg24');
+const volEl    = $('vol24');
+const markEl   = $('mark');
+const fundEl   = $('funding');
+const equityEl = $('equity');
+const asksEl   = $('asks');
+const bidsEl   = $('bids');
+const spreadEl = $('spreadVal');
+const tradesEl = $('tradesList');
+const tabsBody = $('tabsBody');
+const placeBtn = $('placeBtn');
+const orderErr = $('orderErr');
+
+const setStatus = (text, cls='') => {
+  statusEl.textContent = text;
+  statusEl.className = 'status' + (cls ? ' '+cls : '');
+};
+
+// ════════════════════════════════════════════════════════════════════════
+// Toast / modal
+// ════════════════════════════════════════════════════════════════════════
+
+function toast(msg, cls='ok', ms=4000) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + cls;
+  el.textContent = msg;
+  $('toasts').appendChild(el);
+  setTimeout(() => el.remove(), ms);
+}
+
+function modalConfirm({ title, kv, warn }) {
+  return new Promise(resolve => {
+    $('confirmWarn').textContent = warn || '';
+    $('confirmWarn').style.display = warn ? '' : 'none';
+    $('confirmKV').innerHTML = kv.map(([k, v, cls]) =>
+      `<span class="k">${k}</span><span class="v ${cls||''}">${v}</span>`).join('');
+    const m = $('confirmModal');
+    m.classList.add('show');
+    const ok = () => { m.classList.remove('show'); cleanup(); resolve(true); };
+    const no = () => { m.classList.remove('show'); cleanup(); resolve(false); };
+    const cleanup = () => {
+      $('confirmOk').removeEventListener('click', ok);
+      $('confirmCancel').removeEventListener('click', no);
+    };
+    $('confirmOk').addEventListener('click', ok);
+    $('confirmCancel').addEventListener('click', no);
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Formatters
+// ════════════════════════════════════════════════════════════════════════
+
+function fmtNum(n, maxFrac=6) {
+  if (!isFinite(n)) return '—';
+  return n.toLocaleString(undefined, { maximumFractionDigits: maxFrac });
+}
+function fmtUsd(n) {
+  if (!isFinite(n)) return '—';
+  const a = Math.abs(n);
+  if (a >= 1e9) return '$' + (n/1e9).toFixed(2) + 'B';
+  if (a >= 1e6) return '$' + (n/1e6).toFixed(2) + 'M';
+  if (a >= 1e3) return '$' + (n/1e3).toFixed(2) + 'K';
+  return '$' + n.toFixed(2);
+}
+function fmtSz(n, coin) {
+  const m = metaByCoin[coin];
+  const dp = m?.szDecimals ?? 4;
+  return n.toLocaleString(undefined, { maximumFractionDigits: dp, minimumFractionDigits: 0 });
+}
+function fmtPx(n) {
+  const dp = n >= 1000 ? 2 : n >= 1 ? 4 : 6;
+  return n.toLocaleString(undefined, { maximumFractionDigits: dp });
+}
+function fmtClock(ms) {
+  const d = new Date(ms);
+  return [d.getHours(), d.getMinutes(), d.getSeconds()]
+    .map(x => String(x).padStart(2, '0')).join(':');
+}
+function shortAddr(a) { return a.slice(0,6) + '…' + a.slice(-4); }
+
+// ════════════════════════════════════════════════════════════════════════
+// HL price/size validation per szDecimals + 5-sig-fig rule
+// ════════════════════════════════════════════════════════════════════════
+//
+// Reference: HL docs "Tick and lot size".
+//   - sz must round to szDecimals decimals
+//   - px (perps): max 5 significant figures AND max (6 - szDecimals) decimals;
+//     integer prices always allowed.
+
+function maxPxDecimals(coin) {
+  const m = metaByCoin[coin];
+  const sz = m?.szDecimals ?? 4;
+  return Math.max(0, 6 - sz);
+}
+
+// Round a number to N significant figures (preserving integer >= sigfigs).
+function roundSigFigs(n, sigfigs) {
+  if (n === 0) return 0;
+  const mag = Math.floor(Math.log10(Math.abs(n)));
+  if (mag >= sigfigs) return Math.round(n);     // integer prices
+  const factor = Math.pow(10, sigfigs - 1 - mag);
+  return Math.round(n * factor) / factor;
+}
+
+// Returns the canonical px string respecting both the 5-sig-fig and the
+// (6-szDecimals) decimal cap. The smaller (more restrictive) wins.
+function canonicalPx(n, coin) {
+  if (!isFinite(n) || n <= 0) return null;
+  const decCap = maxPxDecimals(coin);
+  let v = roundSigFigs(n, 5);
+  v = parseFloat(v.toFixed(decCap));
+  // Format without trailing zeros
+  return String(v);
+}
+function canonicalSz(n, coin) {
+  if (!isFinite(n) || n <= 0) return null;
+  const m = metaByCoin[coin];
+  const sz = m?.szDecimals ?? 4;
+  return String(parseFloat(n.toFixed(sz)));
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// REST: history + meta
+// ════════════════════════════════════════════════════════════════════════
+
+async function loadHistory(coin, interval) {
+  const r = await fetch(`${API_URL}/klines?coin=${coin}&interval=${interval}&limit=200`);
+  const j = await r.json();
+  if (j.code !== 200) throw new Error(j.msg || 'http error');
+  const bars = (j.data || []).map(row => ({
+    time: Math.floor(row.t / 1000),
+    open: parseFloat(row.o), high: parseFloat(row.h),
+    low:  parseFloat(row.l), close: parseFloat(row.c),
+  }));
+  series.setData(bars);
+  chart.timeScale().fitContent();
+}
+
+async function loadMeta() {
+  try {
+    const r = await fetch(`${API_URL}/meta`);
+    const j = await r.json();
+    if (j.code !== 200) throw new Error(j.msg);
+    metaUniverse = j.data?.universe || [];
+    metaByCoin = Object.fromEntries(metaUniverse.map((a, i) => [a.name, { ...a, idx: i }]));
+  } catch (err) {
+    console.warn('meta load failed; using defaults', err);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Chart
+// ════════════════════════════════════════════════════════════════════════
+
+const chart = LightweightCharts.createChart($('chart'), {
+  layout: { background: { color: '#0f1115' }, textColor: '#aab' },
+  grid:   { vertLines: { color: '#1a1f2a' }, horzLines: { color: '#1a1f2a' } },
+  rightPriceScale: { borderColor: '#2a313f' },
+  timeScale: { borderColor: '#2a313f', timeVisible: true, secondsVisible: false },
+  crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+});
+const series = chart.addCandlestickSeries({
+  upColor:'#4ade80', downColor:'#ef4444',
+  wickUpColor:'#4ade80', wickDownColor:'#ef4444',
+  borderVisible: false,
+});
+
+// ════════════════════════════════════════════════════════════════════════
+// Public ws (our stream service): kline + l2book + ticker + trades
+// ════════════════════════════════════════════════════════════════════════
+
+let prevLast = null;
+let tradesBuf = [];
+const TRADES_KEEP = 50;
+const BOOK_DEPTH  = 20;   // HL `l2Book` ws default cap is 20/side; show all of it
+
+function clearBook() {
+  asksEl.innerHTML = `<div class="empty">waiting…</div>`;
+  bidsEl.innerHTML = '';
+  spreadEl.textContent = '—';
+  bestBid = bestAsk = null;
+  lastBookFrame = null;
+  $('bookStepInfo').textContent = '';
+}
+function clearTrades() { tradesBuf = []; tradesEl.innerHTML = `<div class="empty">waiting…</div>`; }
+
+function renderTicker(frame) {
+  const ctx = frame.ctx || {};
+  const mark = parseFloat(ctx.markPx);
+  const mid  = parseFloat(ctx.midPx);
+  const prev = parseFloat(ctx.prevDayPx);
+  const vol  = parseFloat(ctx.dayNtlVlm);
+  const fund = ctx.funding != null ? parseFloat(ctx.funding) : null;
+
+  const last = isFinite(mark) ? mark : mid;
+  if (isFinite(last)) {
+    lastEl.textContent = fmtPx(last);
+    lastEl.className = 'last ' + (prevLast == null ? '' : last > prevLast ? 'up' : last < prevLast ? 'down' : '');
+    prevLast = last;
+  }
+  if (isFinite(prev) && isFinite(last)) {
+    const pct = ((last - prev) / prev) * 100;
+    chgEl.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+    chgEl.className = 'val ' + (pct >= 0 ? 'up' : 'down');
+  }
+  if (isFinite(vol))  volEl.textContent  = fmtUsd(vol);
+  if (isFinite(mark)) markEl.textContent = fmtPx(mark);
+  if (fund != null)   fundEl.textContent = (fund * 100).toFixed(4) + '% / ' + nextHourCountdown();
+}
+
+function nextHourCountdown() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setUTCMinutes(0, 0, 0);
+  next.setUTCHours(now.getUTCHours() + 1);
+  const ms = next - now;
+  const m = Math.floor(ms / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  return `${m}m ${String(s).padStart(2,'0')}s`;
+}
+setInterval(() => {
+  const cur = fundEl.textContent;
+  if (!cur || cur === '—') return;
+  const slash = cur.indexOf('/');
+  if (slash < 0) return;
+  fundEl.textContent = cur.slice(0, slash + 2) + nextHourCountdown();
+}, 1000);
+
+// Cache last raw frame so the step selector can re-render immediately.
+let lastBookFrame = null;
+
+// bucketize: walk levels best-first and emit one row per `threshold` of
+// accumulated size. The row's price is the WORST price seen while filling
+// that threshold (so reading the row tells you "if I market-trade `threshold`
+// units, I'd fill at this price"). The last partial bucket is emitted as-is.
+//
+//   threshold <= 0 → raw mode, return input unchanged
+//
+// Returned rows: { px, sz } — `n` (orders count) is meaningless once buckets
+// don't align with HL's native levels, so it's dropped here. The renderer
+// shows a cumulative-size column instead, which is far more useful for the
+// "what price would I get for X units?" question this view answers.
+function bucketize(levels, threshold) {
+  if (threshold <= 0 || levels.length === 0) return levels.map(l => ({ px: l.px, sz: l.sz }));
+  const out = [];
+  let cumSz = 0;
+  let lastPx = levels[0].px;
+  for (const lv of levels) {
+    let remaining = parseFloat(lv.sz);
+    lastPx = lv.px;
+    while (cumSz + remaining >= threshold) {
+      const take = threshold - cumSz;
+      remaining -= take;
+      out.push({ px: lv.px, sz: String(threshold) });
+      cumSz = 0;
+    }
+    cumSz += remaining;
+  }
+  if (cumSz > 0) out.push({ px: lastPx, sz: String(cumSz) });
+  return out;
+}
+
+function renderBook(frame) {
+  lastBookFrame = frame;
+  const threshold = parseFloat($('bookStep').value) || 0;
+  const bidsRaw = frame.levels?.[0] ?? [];
+  const asksRaw = frame.levels?.[1] ?? [];
+
+  $('bookStepInfo').textContent = threshold > 0
+    ? `${threshold} ${frame.coin}/row`
+    : '';
+
+  const bids = bucketize(bidsRaw, threshold).slice(0, BOOK_DEPTH);
+  const asks = bucketize(asksRaw, threshold).slice(0, BOOK_DEPTH);
+  if (!bids.length && !asks.length) { clearBook(); return; }
+
+  // Cumulative-size column ("Sum") — running total from best outward, so
+  // each row answers: "if I trade this much from best, where do I end up?"
+  const withCum = arr => {
+    let cum = 0;
+    return arr.map(lv => {
+      cum += parseFloat(lv.sz);
+      return { ...lv, cum };
+    });
+  };
+  const bidsC = withCum(bids);
+  const asksC = withCum(asks);
+
+  // Depth-bar background scaled by cumulative size so the bar grows monotonically
+  // outward from the spread — visually intuitive for "how deep am I going?".
+  const maxCum = Math.max(
+    bidsC.length ? bidsC[bidsC.length - 1].cum : 0,
+    asksC.length ? asksC[asksC.length - 1].cum : 0,
+  );
+  const rowHTML = (lv, side) => {
+    const pct = maxCum > 0 ? (lv.cum / maxCum) * 100 : 0;
+    return `<div class="row ${side}">
+      <span class="bg" style="width:${pct.toFixed(2)}%"></span>
+      <span class="px">${fmtPx(parseFloat(lv.px))}</span>
+      <span class="sz">${fmtSz(parseFloat(lv.sz), frame.coin)}</span>
+      <span class="n">${fmtSz(lv.cum, frame.coin)}</span>
+    </div>`;
+  };
+  asksEl.innerHTML = asksC.map(lv => rowHTML(lv, 'ask')).join('');
+  bidsEl.innerHTML = bidsC.map(lv => rowHTML(lv, 'bid')).join('');
+
+  // bestBid/bestAsk MUST come from RAW levels — bucketized prices are bucket
+  // boundaries, not real top-of-book. Market-order slippage and spread
+  // display rely on the true best.
+  bestBid = bidsRaw.length ? parseFloat(bidsRaw[0].px) : null;
+  bestAsk = asksRaw.length ? parseFloat(asksRaw[0].px) : null;
+  lastBookTs = Date.now();
+
+  if (bestBid && bestAsk) {
+    const spread = bestAsk - bestBid;
+    const bps = (spread / bestBid) * 1e4;
+    spreadEl.textContent = `${fmtPx(spread)} (${bps.toFixed(2)} bps)`;
+  } else {
+    spreadEl.textContent = '—';
+  }
+  updateOrderSummary();
+}
+
+function applyTradesBatch(arr) {
+  if (!arr || !arr.length) return;
+  const seen = new Set(tradesBuf.map(t => t.tid));
+  for (const t of arr) {
+    if (!seen.has(t.tid)) { tradesBuf.push(t); seen.add(t.tid); }
+  }
+  tradesBuf.sort((a, b) => b.tid - a.tid);
+  if (tradesBuf.length > TRADES_KEEP) tradesBuf.length = TRADES_KEEP;
+  tradesEl.innerHTML = tradesBuf.map(t => `
+    <div class="row ${t.side}">
+      <span class="time">${fmtClock(t.time)}</span>
+      <span class="px">${fmtPx(parseFloat(t.px))}</span>
+      <span class="sz">${fmtSz(parseFloat(t.sz), t.coin)}</span>
+    </div>`).join('');
+}
+
+function ensurePublicWS() {
+  if (publicWS && publicWS.readyState === WebSocket.OPEN) return Promise.resolve();
+  setStatus('connecting…', 'wait');
+  return new Promise((resolve, reject) => {
+    publicWS = new WebSocket(WS_URL);
+    publicWS.onopen  = () => { setStatus('live', 'ok'); resolve(); };
+    publicWS.onclose = () => { setStatus('disconnected', 'err'); publicWS = null; };
+    publicWS.onerror = (e) => { setStatus('ws error', 'err'); reject(e); };
+    publicWS.onmessage = (e) => {
+      const m = JSON.parse(e.data);
+      if (Array.isArray(m)) {
+        if (currentCoin && m.length && m[0].coin !== currentCoin) return;
+        applyTradesBatch(m); return;
+      }
+      if (m.error) { console.warn('ws:', m.error); return; }
+      if (m.levels) {
+        if (currentCoin && m.coin !== currentCoin) return;
+        renderBook(m); return;
+      }
+      if (m.ctx) {
+        if (currentCoin && m.coin !== currentCoin) return;
+        renderTicker(m); return;
+      }
+      if (m.s !== undefined) {
+        if (currentKline && (m.s !== currentKline.coin || m.i !== currentKline.interval)) return;
+        series.update({
+          time: Math.floor(m.t / 1000),
+          open: parseFloat(m.o), high: parseFloat(m.h),
+          low:  parseFloat(m.l), close: parseFloat(m.c),
+        });
+      }
+    };
+  });
+}
+function pubSend(action, channel, coin, interval) {
+  if (!publicWS || publicWS.readyState !== WebSocket.OPEN) return;
+  const msg = { action, channel, coin };
+  if (interval) msg.interval = interval;
+  publicWS.send(JSON.stringify(msg));
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Crypto primitives (utf8/hex/uint256, keccak256, EIP-712 manual digest)
+// ════════════════════════════════════════════════════════════════════════
+//
+// We hand-roll the EIP-712 digest for the HL `Agent` typed data because the
+// agent key signs locally — there's no MetaMask `eth_signTypedData_v4` to do
+// the hashing for us. The math is per EIP-712 §C "encodeType / hashStruct".
+//
+// Two struct hashes are involved:
+//   domainSep = keccak256( typeHash_EIP712Domain
+//                          ‖ keccak256("Exchange") ‖ keccak256("1")
+//                          ‖ uint256(1337) ‖ pad32(0x000…000) )
+//   structHash= keccak256( typeHash_Agent ‖ keccak256(source) ‖ connectionId )
+//   digest    = keccak256( 0x1901 ‖ domainSep ‖ structHash )
+//
+// `domainSep` is constant for all orders so we precompute once at boot.
+
+function utf8(s) { return new TextEncoder().encode(s); }
+function hexToBytes(hex) {
+  const h = hex.replace(/^0x/, '');
+  if (h.length % 2) throw new Error('odd hex length');
+  const out = new Uint8Array(h.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(h.slice(i*2, i*2+2), 16);
+  return out;
+}
+// Wrapper: js-sha3's keccak256 returns hex by default. Use .arrayBuffer for
+// bytes so we can chain into more keccak calls without round-tripping hex.
+function k256(input) {
+  return new Uint8Array(keccak256.arrayBuffer(input));
+}
+function uint256ToBytes(n) {
+  const out = new Uint8Array(32);
+  let bi = BigInt(n);
+  for (let i = 31; i >= 0; i--) { out[i] = Number(bi & 0xffn); bi >>= 8n; }
+  return out;
+}
+function addrToBytes32(hexAddr) {
+  // 20-byte address left-padded to 32 bytes (EIP-712 abi-encode of `address`).
+  const a = hexToBytes(hexAddr);
+  if (a.length !== 20) throw new Error('bad address length');
+  const out = new Uint8Array(32);
+  out.set(a, 12);
+  return out;
+}
+
+const TYPEHASH_EIP712DOMAIN = k256(utf8(
+  'EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)'
+));
+const TYPEHASH_AGENT = k256(utf8('Agent(string source,bytes32 connectionId)'));
+
+const AGENT_DOMAIN_SEP = k256(bytesConcatLazy(
+  TYPEHASH_EIP712DOMAIN,
+  k256(utf8('Exchange')),
+  k256(utf8('1')),
+  uint256ToBytes(1337),                                    // HL phantom chain
+  addrToBytes32('0x0000000000000000000000000000000000000000'),
+));
+
+// `bytesConcat` exists below; use a small local copy here for the bootstrap
+// of AGENT_DOMAIN_SEP which is computed before that function's definition.
+function bytesConcatLazy(...arrs) {
+  const total = arrs.reduce((s, a) => s + a.length, 0);
+  const out = new Uint8Array(total);
+  let o = 0; for (const a of arrs) { out.set(a, o); o += a.length; }
+  return out;
+}
+
+function agentEip712Digest(source, connectionIdBytes) {
+  const structHash = k256(bytesConcatLazy(
+    TYPEHASH_AGENT,
+    k256(utf8(source)),
+    connectionIdBytes,
+  ));
+  return k256(bytesConcatLazy(new Uint8Array([0x19, 0x01]), AGENT_DOMAIN_SEP, structHash));
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Agent keypair: gen, persist, load, sign
+// ════════════════════════════════════════════════════════════════════════
+
+function deriveAgentAddress(privKeyBytes) {
+  // Uncompressed pubkey is 65 bytes (0x04 ‖ X ‖ Y); ETH address = last 20 bytes
+  // of keccak256(X ‖ Y).
+  const pub = secp.getPublicKey(privKeyBytes, false);
+  const xy  = pub.slice(1);                              // strip 0x04 prefix
+  const h   = k256(xy);
+  return '0x' + Array.from(h.slice(12)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function generateAgentKey() {
+  const priv = secp.utils.randomPrivateKey();
+  return {
+    privKeyHex: '0x' + Array.from(priv).map(b => b.toString(16).padStart(2, '0')).join(''),
+    addrHex:    deriveAgentAddress(priv),
+  };
+}
+
+function saveAgent(a) {
+  agent = a;
+  localStorage.setItem(AGENT_LS_KEY, JSON.stringify(a));
+}
+function clearAgent() {
+  agent = null;
+  localStorage.removeItem(AGENT_LS_KEY);
+}
+function loadAgent() {
+  try {
+    const raw = localStorage.getItem(AGENT_LS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed.privKeyHex || !parsed.addrHex || !parsed.owner) return null;
+    return parsed;
+  } catch (_) { return null; }
+}
+
+// secp256k1 sign of a 32-byte digest with the agent's private key. Returns
+// {r, s, v} where v ∈ {27, 28} per Ethereum convention.
+async function agentSignDigest(digestBytes) {
+  if (!agent) throw new Error('agent not enabled');
+  const priv = hexToBytes(agent.privKeyHex);
+  const sig  = await secp.signAsync(digestBytes, priv);
+  // noble v2 returns Signature with .r / .s as bigint and .recovery 0|1.
+  return {
+    r: '0x' + sig.r.toString(16).padStart(64, '0'),
+    s: '0x' + sig.s.toString(16).padStart(64, '0'),
+    v: sig.recovery + 27,
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Wallet (MetaMask) + chain switching
+// ════════════════════════════════════════════════════════════════════════
+
+async function ensureArbitrum() {
+  const cur = await window.ethereum.request({ method: 'eth_chainId' });
+  if (cur === ARBITRUM_CHAIN_ID_HEX) return;
+  try {
+    await window.ethereum.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: ARBITRUM_CHAIN_ID_HEX }],
+    });
+  } catch (e) {
+    // 4902 = chain not added to this MetaMask.
+    if (e.code === 4902) {
+      await window.ethereum.request({
+        method: 'wallet_addEthereumChain',
+        params: [{
+          chainId: ARBITRUM_CHAIN_ID_HEX,
+          chainName: 'Arbitrum One',
+          nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+          rpcUrls: ['https://arb1.arbitrum.io/rpc'],
+          blockExplorerUrls: ['https://arbiscan.io/'],
+        }],
+      });
+    } else {
+      throw e;
+    }
+  }
+}
+
+function renderWallet() {
+  const wrap = $('walletWrap');
+  if (!walletAddr) {
+    wrap.innerHTML = `<button id="connectBtn">Connect Wallet</button>`;
+    $('connectBtn').onclick = connectWallet;
+  } else {
+    const tradingPart = agent
+      ? `<span class="trading-on">trading ✓</span> <button id="disableTradingBtn">disable</button>`
+      : `<button id="enableTradingBtn">Enable Trading</button>`;
+    wrap.innerHTML = `<span class="addr">${shortAddr(walletAddr)}</span> ${tradingPart} <button id="disconnectBtn">disconnect</button>`;
+    $('disconnectBtn').onclick = disconnectWallet;
+    if (agent) $('disableTradingBtn').onclick = disableTrading;
+    else       $('enableTradingBtn').onclick = enableTrading;
+  }
+  refreshPlaceBtn();
+}
+
+async function connectWallet() {
+  if (!window.ethereum) { toast('MetaMask not detected', 'err'); return; }
+  try {
+    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+    walletAddr = accounts[0]?.toLowerCase();
+    if (!walletAddr) throw new Error('no account');
+
+    // Restore an agent if its `owner` matches the connected wallet.
+    const stored = loadAgent();
+    agent = (stored && stored.owner.toLowerCase() === walletAddr) ? stored : null;
+    if (stored && !agent) {
+      console.warn('stored agent belongs to a different wallet; ignoring');
+    }
+
+    window.ethereum.on?.('accountsChanged', accs => {
+      if (!accs?.length) { disconnectWallet(); return; }
+      walletAddr = accs[0].toLowerCase();
+      // New owner ⇒ stored agent no longer ours.
+      const s = loadAgent();
+      agent = (s && s.owner.toLowerCase() === walletAddr) ? s : null;
+      renderWallet();
+      reconnectPrivateWS();
+    });
+    renderWallet();
+    reconnectPrivateWS();
+    toast('Wallet connected: ' + shortAddr(walletAddr));
+  } catch (e) {
+    toast('Connect failed: ' + (e.message || e), 'err');
+  }
+}
+function disconnectWallet() {
+  walletAddr = null;
+  // Keep agent in localStorage — if user reconnects same wallet, we restore.
+  agent = null;
+  positions = []; openOrders = []; fills = [];
+  if (privateWS) { try { privateWS.close(); } catch(_){} privateWS = null; }
+  equityEl.textContent = '—';
+  renderWallet();
+  renderTab();
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Enable trading: generate agent → MetaMask signs ApproveAgent → POST → save
+// ────────────────────────────────────────────────────────────────────────
+
+async function enableTrading() {
+  if (!walletAddr) { toast('connect wallet first', 'err'); return; }
+  try {
+    await ensureArbitrum();
+  } catch (e) {
+    toast('Switch to Arbitrum failed: ' + (e.message || e), 'err'); return;
+  }
+
+  const cand = generateAgentKey();
+  const nonce = Date.now();
+  const action = {
+    type: 'approveAgent',
+    hyperliquidChain: IS_MAINNET ? 'Mainnet' : 'Testnet',
+    signatureChainId: ARBITRUM_CHAIN_ID_HEX,
+    agentAddress: cand.addrHex,
+    agentName: '',
+    nonce,
+  };
+  // EIP-712 user-signed action (different domain from L1 actions).
+  // chainId here = real Arbitrum 42161 so MetaMask is happy.
+  const typedData = {
+    domain: {
+      chainId: 42161,
+      name: 'HyperliquidSignTransaction',
+      verifyingContract: '0x0000000000000000000000000000000000000000',
+      version: '1',
+    },
+    types: {
+      EIP712Domain: [
+        { name: 'name', type: 'string' },
+        { name: 'version', type: 'string' },
+        { name: 'chainId', type: 'uint256' },
+        { name: 'verifyingContract', type: 'address' },
+      ],
+      'HyperliquidTransaction:ApproveAgent': [
+        { name: 'hyperliquidChain', type: 'string' },
+        { name: 'agentAddress',     type: 'address' },
+        { name: 'agentName',        type: 'string' },
+        { name: 'nonce',            type: 'uint64' },
+      ],
+    },
+    primaryType: 'HyperliquidTransaction:ApproveAgent',
+    message: action,
+  };
+
+  let sig;
+  try {
+    sig = await window.ethereum.request({
+      method: 'eth_signTypedData_v4',
+      params: [walletAddr, JSON.stringify(typedData)],
+    });
+  } catch (e) {
+    toast('Sign rejected: ' + (e.message || e), 'err'); return;
+  }
+  if (!sig || sig.length !== 132) { toast('bad sig length', 'err'); return; }
+  const signature = {
+    r: '0x' + sig.slice(2, 66),
+    s: '0x' + sig.slice(66, 130),
+    v: parseInt(sig.slice(130, 132), 16),
+  };
+
+  // POST to /exchange — same envelope as orders/cancels, but action is
+  // approveAgent and signing was via MetaMask (not the agent key).
+  let resp;
+  try {
+    const r = await fetch(HL_REST + '/exchange', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, nonce, signature }),
+    });
+    resp = await r.json();
+  } catch (e) {
+    toast('Approve POST failed: ' + (e.message || e), 'err'); return;
+  }
+  if (resp.status !== 'ok') {
+    toast('Approve rejected: ' + (resp.response || resp.status), 'err', 8000); return;
+  }
+
+  saveAgent({
+    privKeyHex: cand.privKeyHex,
+    addrHex:    cand.addrHex,
+    owner:      walletAddr,
+    approvedAt: nonce,
+  });
+  renderWallet();
+  toast('Trading enabled (agent ' + shortAddr(cand.addrHex) + ')');
+}
+
+function disableTrading() {
+  // Local-only: clearing the key prevents this browser from signing further
+  // orders. The agent is still authorized on HL's side until it expires or
+  // is overwritten by another approveAgent — that's fine since nobody else
+  // has the private key.
+  clearAgent();
+  renderWallet();
+  toast('Trading disabled (local key cleared)');
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Private ws (direct to HL): webData2 + userFills
+// ════════════════════════════════════════════════════════════════════════
+
+function reconnectPrivateWS() {
+  if (privateWS) { try { privateWS.close(); } catch(_){} }
+  if (!walletAddr) return;
+  privateWS = new WebSocket(HL_WS);
+  privateWS.onopen = () => {
+    privateWS.send(JSON.stringify({ method: 'subscribe', subscription: { type: 'webData2', user: walletAddr } }));
+    privateWS.send(JSON.stringify({ method: 'subscribe', subscription: { type: 'userFills', user: walletAddr } }));
+  };
+  privateWS.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.channel === 'webData2') handleWebData2(m.data);
+    else if (m.channel === 'userFills') handleUserFills(m.data);
+  };
+  privateWS.onclose = () => {
+    if (walletAddr) setTimeout(reconnectPrivateWS, 2000);
+  };
+  privateWS.onerror = (e) => console.warn('private ws err', e);
+}
+
+function handleWebData2(d) {
+  // d.clearinghouseState.assetPositions, d.openOrders, d.clearinghouseState.marginSummary
+  const ch = d?.clearinghouseState || {};
+  const ms = ch.marginSummary || {};
+  userEquity = parseFloat(ms.accountValue);
+  if (isFinite(userEquity)) equityEl.textContent = fmtUsd(userEquity);
+  positions = (ch.assetPositions || []).map(p => p.position);
+  openOrders = (d.openOrders || []);
+
+  // Snapshot per-coin leverage from open positions. HL only exposes leverage
+  // as a property of an existing position — for assets with no position there's
+  // no "current" value to read; the user picks one and Apply sets it on the
+  // first order. We DON'T merge with previous state because positions[] is
+  // authoritative each frame (if a position closed, drop the entry).
+  leverageByCoin = {};
+  for (const p of positions) {
+    if (p?.coin && p.leverage) {
+      leverageByCoin[p.coin] = { value: p.leverage.value, type: p.leverage.type };
+    }
+  }
+  refreshLeverageUI();
+
+  if (activeTab === 'positions' || activeTab === 'orders') renderTab();
+}
+function handleUserFills(d) {
+  const arr = d?.fills || [];
+  const seen = new Set(fills.map(f => f.tid));
+  for (const f of arr) if (!seen.has(f.tid)) fills.push(f);
+  fills.sort((a, b) => b.time - a.time);
+  if (fills.length > 100) fills.length = 100;
+  if (activeTab === 'fills') renderTab();
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// HL L1 action signing — agent key path
+// ════════════════════════════════════════════════════════════════════════
+//
+// MetaMask 11+ refuses to sign EIP-712 with a domain.chainId that doesn't
+// match the active wallet network. HL's L1 actions require chainId 1337
+// (a phantom ID, not a real public chain), so MetaMask can never sign them
+// directly. We work around this with the standard HL "API wallet" / agent
+// pattern: a one-time MetaMask signature approves a freshly-generated local
+// keypair, and from then on every order is signed by that key locally.
+//
+// Action hashing is identical to the Python SDK reference:
+//
+//   actionBytes = msgpack(action)
+//   data        = actionBytes ‖ nonce(uint64 BE) ‖ vaultByte
+//                 vaultByte = 0x00  (no vault) or 0x01 ‖ 20-byte vault addr
+//   connId      = keccak256(data)
+//   digest      = keccak256(0x1901 ‖ AGENT_DOMAIN_SEP ‖ structHash(connId))
+//   {r,s,v}     = secp256k1.sign(digest, agent.privKey)
+//   POST /exchange { action, nonce, signature: {r,s,v} }
+
+function bytesConcat(...arrs) {
+  return bytesConcatLazy(...arrs);
+}
+function nonceToBytes(n) {
+  const out = new Uint8Array(8);
+  let bi = BigInt(n);
+  for (let i = 7; i >= 0; i--) { out[i] = Number(bi & 0xffn); bi >>= 8n; }
+  return out;
+}
+function bytesToHex(b) {
+  return '0x' + Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
+// Returns the connectionId as a Uint8Array (32 bytes). Used both as the
+// EIP-712 `bytes32` field and as input to the local digest builder.
+function actionHash(action, vaultAddress, nonce) {
+  const actionBytes = MessagePack.encode(action);
+  const nonceBytes  = nonceToBytes(nonce);
+  let vaultBytes;
+  if (!vaultAddress) {
+    vaultBytes = new Uint8Array([0x00]);
+  } else {
+    vaultBytes = bytesConcat(new Uint8Array([0x01]), hexToBytes(vaultAddress));
+  }
+  const data = bytesConcat(actionBytes, nonceBytes, vaultBytes);
+  return k256(data);
+}
+
+async function signL1Action(action, nonce) {
+  if (!agent) throw new Error('trading not enabled — click Enable Trading');
+  const connId = actionHash(action, null, nonce);
+  const source = IS_MAINNET ? 'a' : 'b';
+  const digest = agentEip712Digest(source, connId);
+
+  // Debug visibility for diff vs HL SDK reference.
+  console.debug('[sign] action', action, 'nonce', nonce,
+                'connId', bytesToHex(connId), 'digest', bytesToHex(digest));
+
+  return agentSignDigest(digest);
+}
+
+async function postExchange(action) {
+  const nonce = Date.now();
+  const signature = await signL1Action(action, nonce);
+  const body = { action, nonce, signature };
+  const r = await fetch(HL_REST + '/exchange', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const j = await r.json();
+  if (j.status !== 'ok') throw new Error(j.response || j.status || 'exchange error');
+  return j;
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Order entry
+// ════════════════════════════════════════════════════════════════════════
+
+function refreshPlaceBtn() {
+  // Walks the user through the next-required action: connect → enable → trade.
+  let txt;
+  if (!walletAddr)      txt = 'Connect wallet';
+  else if (!agent)      txt = 'Enable Trading';
+  else                  txt = orderForm.side === 'B' ? 'Buy / Long' : 'Sell / Short';
+  placeBtn.textContent = txt;
+  placeBtn.className   = 'place ' + (orderForm.side === 'B' ? 'buy' : 'sell');
+  validateForm();
+  refreshLevApply();   // Apply gate also depends on agent state
+}
+
+function validateForm() {
+  orderErr.textContent = '';
+  if (!walletAddr) { placeBtn.disabled = true; return; }
+  // Gate on agent: pre-trading state still allows clicking the button (it
+  // runs enableTrading from the place handler), so leave it enabled.
+  if (!agent) { placeBtn.disabled = false; return; }
+  if (!currentCoin) { placeBtn.disabled = true; return; }
+
+  const px = parseFloat($('priceInput').value);
+  const sz = parseFloat($('sizeInput').value);
+  if (!isFinite(sz) || sz <= 0) { placeBtn.disabled = true; return; }
+
+  if (orderForm.type === 'limit') {
+    if (!isFinite(px) || px <= 0) { placeBtn.disabled = true; return; }
+    if (!canonicalPx(px, currentCoin)) {
+      orderErr.textContent = 'invalid price'; placeBtn.disabled = true; return;
+    }
+  } else {
+    // market: need a fresh book
+    if (!bestBid || !bestAsk || Date.now() - lastBookTs > 2000) {
+      orderErr.textContent = 'orderbook stale'; placeBtn.disabled = true; return;
+    }
+  }
+  if (!canonicalSz(sz, currentCoin)) {
+    orderErr.textContent = `size must round to ${metaByCoin[currentCoin]?.szDecimals ?? 4} dp`;
+    placeBtn.disabled = true; return;
+  }
+
+  placeBtn.disabled = false;
+}
+
+function updateOrderSummary() {
+  const px = parseFloat($('priceInput').value);
+  const sz = parseFloat($('sizeInput').value);
+  let refPx;
+  if (orderForm.type === 'limit') refPx = isFinite(px) && px > 0 ? px : null;
+  else refPx = orderForm.side === 'B' ? bestAsk : bestBid;
+  if (isFinite(sz) && sz > 0 && isFinite(refPx) && refPx > 0) {
+    const notional = sz * refPx;
+    $('notionalOut').textContent = fmtUsd(notional);
+    // HL fee: ~0.035% taker, 0.01% maker (perps default tier). Use 0.035% as conservative est.
+    $('feeOut').textContent = fmtUsd(notional * 0.00035);
+  } else {
+    $('notionalOut').textContent = '$0.00';
+    $('feeOut').textContent = '$0.00';
+  }
+  validateForm();
+}
+
+function setSide(side) {
+  orderForm.side = side;
+  for (const b of $('sideToggles').children) {
+    b.classList.toggle('on', b.dataset.side === side);
+  }
+  refreshPlaceBtn();
+}
+function setType(t) {
+  orderForm.type = t;
+  for (const b of $('typeToggles').children) {
+    b.classList.toggle('on', b.dataset.type === t);
+  }
+  $('priceField').style.display    = t === 'limit'  ? '' : 'none';
+  $('slippageField').style.display = t === 'market' ? '' : 'none';
+  updateOrderSummary();
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Leverage / margin mode
+// ────────────────────────────────────────────────────────────────────────
+//
+// HL leverage is an account-level setting *per asset*, not an order parameter.
+// `updateLeverage` is its own L1 action; once applied, every subsequent order
+// on that asset opens at this leverage until the next updateLeverage. So the
+// UI flow is: pick value + mode → Apply (signs + POSTs) → it sticks until
+// changed. webData2 echoes the new value via positions[i].leverage.
+
+const levInput     = $('levInput');
+const marginMode   = $('marginMode');
+const applyLevBtn  = $('applyLevBtn');
+const levMeta      = $('levMeta');
+
+function refreshLeverageUI() {
+  if (!currentCoin) {
+    levMeta.textContent = '';
+    levInput.value = '';
+    levInput.disabled = true;
+    marginMode.disabled = true;
+    applyLevBtn.disabled = true;
+    return;
+  }
+  const meta = metaByCoin[currentCoin];
+  const max  = meta?.maxLeverage ?? 50;
+  const cur  = leverageByCoin[currentCoin]; // may be undefined
+  levInput.max = max;
+  levInput.disabled = false;
+  marginMode.disabled = false;
+
+  // Only overwrite the input if the user hasn't started editing — prevents
+  // a webData2 push from clobbering in-progress input. We treat input.value
+  // == ('' or matches current) as "not editing".
+  const editing = levInput.value !== '' && levInput.value !== String(cur?.value ?? '');
+  if (!editing) {
+    levInput.value = cur ? String(cur.value) : '';
+    marginMode.value = cur?.type ?? 'cross';
+  }
+
+  levMeta.textContent = cur
+    ? `current ${cur.value}× ${cur.type} · max ${max}×`
+    : `no position · max ${max}×`;
+
+  refreshLevApply();
+}
+
+function refreshLevApply() {
+  if (!currentCoin || !agent) {
+    applyLevBtn.disabled = true; return;
+  }
+  const v = parseInt(levInput.value, 10);
+  const meta = metaByCoin[currentCoin];
+  const max = meta?.maxLeverage ?? 50;
+  if (!Number.isInteger(v) || v < 1 || v > max) {
+    applyLevBtn.disabled = true; return;
+  }
+  const cur = leverageByCoin[currentCoin];
+  const same = cur && cur.value === v && cur.type === marginMode.value;
+  applyLevBtn.disabled = !!same;
+}
+
+async function applyLeverage() {
+  if (!walletAddr) { return connectWallet(); }
+  if (!agent)      { return enableTrading(); }
+  if (!currentCoin) return;
+  const meta = metaByCoin[currentCoin];
+  if (!meta) { toast('meta not loaded', 'err'); return; }
+  const v = parseInt(levInput.value, 10);
+  if (!Number.isInteger(v) || v < 1 || v > (meta.maxLeverage ?? 50)) {
+    toast('invalid leverage', 'err'); return;
+  }
+  const action = {
+    type: 'updateLeverage',
+    asset:    meta.idx,
+    isCross:  marginMode.value === 'cross',
+    leverage: v,
+  };
+  applyLevBtn.disabled = true;
+  try {
+    await postExchange(action);
+    toast(`Leverage set: ${currentCoin} ${v}× ${marginMode.value}`);
+    // webData2 will refresh leverageByCoin shortly. Optimistically update so
+    // the meta line + Apply state reflect the new value immediately.
+    leverageByCoin[currentCoin] = { value: v, type: marginMode.value };
+    refreshLeverageUI();
+  } catch (e) {
+    toast('Update leverage failed: ' + (e.message || e), 'err', 6000);
+    refreshLevApply();
+  }
+}
+
+async function placeOrder() {
+  // The place button doubles as the "next-step" CTA — first click connects
+  // wallet, second click enables trading, third+ clicks place orders.
+  if (!walletAddr) { return connectWallet(); }
+  if (!agent)      { return enableTrading(); }
+  if (!currentCoin) return;
+  const meta = metaByCoin[currentCoin];
+  if (!meta) { toast('meta not loaded', 'err'); return; }
+
+  const side  = orderForm.side === 'B';     // is_buy
+  const szRaw = parseFloat($('sizeInput').value);
+  const szStr = canonicalSz(szRaw, currentCoin);
+  if (!szStr) { toast('invalid size', 'err'); return; }
+
+  let pxStr, tif;
+  if (orderForm.type === 'limit') {
+    const pxRaw = parseFloat($('priceInput').value);
+    pxStr = canonicalPx(pxRaw, currentCoin);
+    if (!pxStr) { toast('invalid price', 'err'); return; }
+    tif = 'Gtc';
+  } else {
+    // market via IOC: cross the book by `slip`
+    const slip = Math.min(5, Math.max(0, parseFloat($('slipInput').value) || 0.5)) / 100;
+    const ref  = side ? bestAsk : bestBid;
+    if (!isFinite(ref) || !ref) { toast('orderbook stale', 'err'); return; }
+    const px   = side ? ref * (1 + slip) : ref * (1 - slip);
+    pxStr = canonicalPx(px, currentCoin);
+    if (!pxStr) { toast('invalid market px', 'err'); return; }
+    tif = 'Ioc';
+  }
+
+  const order = {
+    a: meta.idx,
+    b: side,
+    p: pxStr,
+    s: szStr,
+    r: orderForm.reduceOnly,
+    t: { limit: { tif } },
+  };
+  const action = { type: 'order', orders: [order], grouping: 'na' };
+
+  const refPx   = parseFloat(pxStr);
+  const notion  = parseFloat(szStr) * refPx;
+
+  // Pre-flight confirmation. Mainnet → always confirm first order of session,
+  // OR any order over LARGE_NOTIONAL_USD.
+  const big = notion >= LARGE_NOTIONAL_USD;
+  if (!confirmedOnceToday || big) {
+    const ok = await modalConfirm({
+      warn: big ? `Large order: ${fmtUsd(notion)} notional. Double-check size.` :
+                  'First order this session — confirming once. Mainnet, real funds.',
+      kv: [
+        ['Coin',     currentCoin],
+        ['Side',     side ? 'BUY' : 'SELL', side ? 'buy' : 'sell'],
+        ['Type',     orderForm.type === 'limit' ? `Limit (${tif})` : `Market (IOC, slip ${$('slipInput').value}%)`],
+        ['Price',    pxStr],
+        ['Size',     szStr + ' ' + currentCoin],
+        ['Notional', fmtUsd(notion)],
+        ['Reduce',   orderForm.reduceOnly ? 'yes' : 'no'],
+      ],
+    });
+    if (!ok) return;
+    confirmedOnceToday = true;
+  }
+
+  placeBtn.disabled = true;
+  try {
+    const resp = await postExchange(action);
+    // resp.response.data.statuses is array; check first
+    const st = resp?.response?.data?.statuses?.[0];
+    if (st?.error) throw new Error(st.error);
+    const filled = st?.filled;
+    const resting = st?.resting;
+    if (filled) {
+      toast(`Filled ${filled.totalSz} @ ${filled.avgPx}`);
+    } else if (resting) {
+      toast(`Resting oid ${resting.oid}`);
+    } else {
+      toast('Order accepted');
+    }
+  } catch (e) {
+    console.error('place failed', e);
+    toast('Order failed: ' + (e.message || e), 'err', 6000);
+  } finally {
+    placeBtn.disabled = false;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Cancel order
+// ════════════════════════════════════════════════════════════════════════
+
+async function cancelOrder(coin, oid) {
+  const meta = metaByCoin[coin];
+  if (!meta) { toast('unknown coin meta', 'err'); return; }
+  const action = { type: 'cancel', cancels: [{ a: meta.idx, o: oid }] };
+  try {
+    const resp = await postExchange(action);
+    const st = resp?.response?.data?.statuses?.[0];
+    if (st?.error) throw new Error(st.error);
+    toast('Cancelled ' + oid);
+  } catch (e) {
+    toast('Cancel failed: ' + (e.message || e), 'err');
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Bottom tabs: positions / open orders / fills
+// ════════════════════════════════════════════════════════════════════════
+
+function renderTab() {
+  if (!walletAddr) {
+    tabsBody.innerHTML = `<div class="empty">Connect wallet to see your positions, orders, fills.</div>`;
+    return;
+  }
+  if (activeTab === 'positions') renderPositions();
+  else if (activeTab === 'orders') renderOpenOrders();
+  else if (activeTab === 'fills') renderFills();
+}
+function renderPositions() {
+  if (!positions.length) {
+    tabsBody.innerHTML = `<div class="empty">No open positions.</div>`; return;
+  }
+  const rows = positions.map(p => {
+    const sz = parseFloat(p.szi);
+    const entry = parseFloat(p.entryPx);
+    const upnl = parseFloat(p.unrealizedPnl);
+    const liq = parseFloat(p.liquidationPx);
+    const lev = p.leverage?.value;
+    const pnlCls = upnl >= 0 ? 'up' : 'down';
+    return `<tr>
+      <td>${p.coin}</td>
+      <td class="num ${sz>0?'up':'down'}">${sz>0?'LONG':'SHORT'} ${fmtSz(Math.abs(sz), p.coin)}</td>
+      <td class="num">${fmtPx(entry)}</td>
+      <td class="num">${fmtPx(parseFloat(p.markPx ?? p.entryPx))}</td>
+      <td class="num ${pnlCls}">${fmtUsd(upnl)}</td>
+      <td class="num">${isFinite(liq)?fmtPx(liq):'—'}</td>
+      <td class="num">${lev ?? '—'}x</td>
+    </tr>`;
+  }).join('');
+  tabsBody.innerHTML = `<table>
+    <thead><tr>
+      <th>Coin</th><th class="num">Size</th><th class="num">Entry</th><th class="num">Mark</th>
+      <th class="num">uPnL</th><th class="num">Liq</th><th class="num">Lev</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+}
+function renderOpenOrders() {
+  if (!openOrders.length) {
+    tabsBody.innerHTML = `<div class="empty">No open orders.</div>`; return;
+  }
+  const rows = openOrders.map(o => {
+    const cls = o.side === 'B' ? 'up' : 'down';
+    return `<tr>
+      <td>${o.coin}</td>
+      <td class="num ${cls}">${o.side === 'B' ? 'BUY' : 'SELL'}</td>
+      <td>${o.orderType ?? 'Limit'}</td>
+      <td class="num">${fmtPx(parseFloat(o.limitPx))}</td>
+      <td class="num">${fmtSz(parseFloat(o.sz), o.coin)} / ${fmtSz(parseFloat(o.origSz), o.coin)}</td>
+      <td class="num"><button data-coin="${o.coin}" data-oid="${o.oid}" class="cancelBtn">cancel</button></td>
+    </tr>`;
+  }).join('');
+  tabsBody.innerHTML = `<table>
+    <thead><tr>
+      <th>Coin</th><th class="num">Side</th><th>Type</th>
+      <th class="num">Price</th><th class="num">Size (rem/orig)</th><th class="num"></th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+  for (const btn of tabsBody.querySelectorAll('.cancelBtn')) {
+    btn.onclick = () => cancelOrder(btn.dataset.coin, parseInt(btn.dataset.oid, 10));
+  }
+}
+function renderFills() {
+  if (!fills.length) {
+    tabsBody.innerHTML = `<div class="empty">No fills.</div>`; return;
+  }
+  const rows = fills.map(f => {
+    const cls = f.side === 'B' ? 'up' : 'down';
+    return `<tr>
+      <td>${fmtClock(f.time)}</td>
+      <td>${f.coin}</td>
+      <td class="num ${cls}">${f.side === 'B' ? 'BUY' : 'SELL'}</td>
+      <td class="num">${fmtPx(parseFloat(f.px))}</td>
+      <td class="num">${fmtSz(parseFloat(f.sz), f.coin)}</td>
+      <td class="num">${fmtUsd(parseFloat(f.closedPnl ?? 0))}</td>
+    </tr>`;
+  }).join('');
+  tabsBody.innerHTML = `<table>
+    <thead><tr>
+      <th>Time</th><th>Coin</th><th class="num">Side</th>
+      <th class="num">Price</th><th class="num">Size</th><th class="num">Realized PnL</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Orchestration
+// ════════════════════════════════════════════════════════════════════════
+
+async function switchTo(coin, interval) {
+  if (currentKline) pubSend('unsub', 'kline', currentKline.coin, currentKline.interval);
+  if (currentCoin) {
+    pubSend('unsub', 'l2book', currentCoin);
+    pubSend('unsub', 'ticker', currentCoin);
+    pubSend('unsub', 'trades', currentCoin);
+  }
+  currentKline = { coin, interval };
+  currentCoin  = coin;
+  prevLast = null;
+  series.setData([]);
+  clearBook(); clearTrades();
+  lastEl.textContent = chgEl.textContent = volEl.textContent = markEl.textContent = fundEl.textContent = '—';
+  chgEl.className = 'val';
+  $('sizeUnit').textContent = coin;
+  $('bookStep').value = '0';   // size threshold makes no sense across coins; reset to raw
+  refreshLeverageUI();   // re-bind leverage panel to the new coin
+
+  try {
+    await loadHistory(coin, interval);
+  } catch (err) {
+    setStatus('history error: ' + err.message, 'err'); return;
+  }
+  await ensurePublicWS();
+  pubSend('sub', 'kline',  coin, interval);
+  pubSend('sub', 'l2book', coin);
+  pubSend('sub', 'ticker', coin);
+  pubSend('sub', 'trades', coin);
+  refreshPlaceBtn();
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Boot
+// ════════════════════════════════════════════════════════════════════════
+
+// Top-bar controls
+$('coin').addEventListener('change', () => switchTo($('coin').value, $('interval').value));
+$('interval').addEventListener('change', () => switchTo($('coin').value, $('interval').value));
+
+// Order form events
+$('priceInput').addEventListener('input', updateOrderSummary);
+$('sizeInput').addEventListener('input',  updateOrderSummary);
+$('slipInput').addEventListener('input',  updateOrderSummary);
+$('reduceOnly').addEventListener('change', e => { orderForm.reduceOnly = e.target.checked; });
+for (const b of $('sideToggles').children) b.addEventListener('click', () => setSide(b.dataset.side));
+for (const b of $('typeToggles').children) b.addEventListener('click', () => setType(b.dataset.type));
+placeBtn.addEventListener('click', placeOrder);
+
+// Leverage controls
+levInput.addEventListener('input',     refreshLevApply);
+marginMode.addEventListener('change',  refreshLevApply);
+applyLevBtn.addEventListener('click',  applyLeverage);
+
+// Book aggregation step — re-render immediately on change without waiting
+// for the next ws frame.
+$('bookStep').addEventListener('change', () => {
+  if (lastBookFrame) renderBook(lastBookFrame);
+});
+// connectBtn is rebound by renderWallet on every state change, so we don't
+// need a one-shot binding here.
+
+// Tabs
+for (const b of document.querySelectorAll('#tabs .nav button')) {
+  b.addEventListener('click', () => {
+    activeTab = b.dataset.tab;
+    for (const x of document.querySelectorAll('#tabs .nav button')) x.classList.toggle('on', x === b);
+    renderTab();
+  });
+}
+
+window.addEventListener('resize', () => {
+  const el = $('chart');
+  chart.resize(el.clientWidth, el.clientHeight);
+});
+
+// Initial wiring
+loadMeta().finally(() => switchTo($('coin').value, $('interval').value));
+renderTab();
+
+// Auto-detect already-connected wallet (e.g., page reload after connecting).
+// If MetaMask still authorizes us silently, restore the agent too so the user
+// doesn't have to re-enable trading on every reload.
+if (window.ethereum) {
+  window.ethereum.request({ method: 'eth_accounts' }).then(accs => {
+    if (accs && accs.length) {
+      walletAddr = accs[0].toLowerCase();
+      const stored = loadAgent();
+      agent = (stored && stored.owner.toLowerCase() === walletAddr) ? stored : null;
+      renderWallet();
+      reconnectPrivateWS();
+    }
+  }).catch(() => {});
+}
+</script>
+</body>
+</html>

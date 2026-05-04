@@ -1,0 +1,66 @@
+# Copy to config.toml and fill in real credentials.
+# config.toml is gitignored; this template is committed.
+
+[hl]
+api_url = "https://api.hyperliquid.xyz"
+ws_url  = "wss://api.hyperliquid.xyz/ws"
+
+[postgres]
+max-open-conns = 64
+max-idle-conns = 16
+host           = "127.0.0.1:5432"
+user           = "postgres"
+password       = "CHANGE_ME"
+database       = "marketdata"
+table-prefix   = ""
+
+[postgres.params]
+sslmode = "disable"
+
+[redis]
+host         = "127.0.0.1:6379"
+password     = ""
+db           = 0
+max-idle     = 8
+max-active   = 64
+idle-timeout = 180
+
+[admin]
+addr = ":9090"
+
+[kline]
+enabled   = true
+intervals = ["1m", "5m", "15m", "1h", "4h", "1d"]
+coins     = ["BTC", "ETH", "SOL"]
+
+[kline.batch]
+size     = 500
+flush_ms = 500
+
+# L2 order book is live-only: HL pushes full top-20 snapshots ~5–10 Hz which we
+# cache + publish to Redis for ws fan-out. No DB persistence.
+[l2book]
+enabled = true
+coins   = ["BTC", "ETH", "SOL"]
+
+# Ticker: mark/mid/funding/24h stats for the top bar (HL `activeAssetCtx`,
+# ~1 Hz). Live-only.
+[ticker]
+enabled = true
+coins   = ["BTC", "ETH", "SOL"]
+
+# Public tape (HL `trades`). A rolling window of recent prints is cached for
+# new subscribers; live-only.
+[trades]
+enabled = true
+coins   = ["BTC", "ETH", "SOL"]
+
+# Per-address fill history → user_fills table. Consumed by the on-demand
+# `cmd/sync-fills` tool, NOT by the long-running collector. Run it manually
+# (or via cron) when you want to refresh PG. Realtime UI is served by the
+# browser's direct HL ws — independent of this.
+#
+#   go run ./cmd/sync-fills --config configs/config.toml
+[userfills]
+addrs         = []
+backfill_days = 90
